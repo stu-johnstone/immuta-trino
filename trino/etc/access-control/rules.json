@@ -1,0 +1,77 @@
+{
+  "catalogs": [
+    {
+      "user": "data_admin",
+      "catalog": "(iceberg|system)",
+      "allow": "all"
+    },
+    {
+      "user": "(immuta-system|finance_analyst|medical_researcher|manufacturing_operator)",
+      "catalog": "(iceberg|system)",
+      "allow": "read-only"
+    },
+    {
+      "catalog": "system",
+      "allow": "read-only"
+    },
+    {
+      "allow": "none"
+    }
+  ],
+  "schemas": [
+    {
+      "user": "data_admin",
+      "catalog": "iceberg",
+      "schema": ".*",
+      "owner": true
+    },
+    {
+      "schema": ".*",
+      "owner": false
+    }
+  ],
+  "tables": [
+    {
+      "schema": "information_schema",
+      "privileges": ["SELECT"]
+    },
+    {
+      "user": "data_admin",
+      "catalog": "iceberg",
+      "schema": ".*",
+      "privileges": ["SELECT", "INSERT", "DELETE", "UPDATE", "OWNERSHIP"]
+    },
+    {
+      "user": "immuta-system",
+      "catalog": "iceberg",
+      "schema": ".*",
+      "privileges": ["SELECT"]
+    },
+    {
+      "user": "finance_analyst",
+      "catalog": "iceberg",
+      "schema": "finance",
+      "privileges": ["SELECT"]
+    },
+    {
+      "user": "medical_researcher",
+      "catalog": "iceberg",
+      "schema": "medical",
+      "privileges": ["SELECT"]
+    },
+    {
+      "user": "manufacturing_operator",
+      "catalog": "iceberg",
+      "schema": "manufacturing",
+      "privileges": ["SELECT"]
+    },
+    {
+      "catalog": "system",
+      "schema": ".*",
+      "privileges": ["SELECT"]
+    },
+    {
+      "privileges": []
+    }
+  ]
+}

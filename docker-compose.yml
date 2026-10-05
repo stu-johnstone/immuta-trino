@@ -55,11 +55,57 @@ services:
     volumes:
       - ./trino/etc/config.properties:/etc/trino/config.properties:ro
       - ./trino/etc/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
+      # File-based access control. rules.json is read live by Trino, so edits
+      # on the host take effect within security.refresh-period.
+      - ./trino/etc/access-control/file.properties:/etc/trino/access-control/file.properties:ro
+      - ./trino/etc/access-control/rules.json:/etc/trino/access-control/rules.json:ro
+      # The Immuta slot in access-control.config-files. This no-op placeholder
+      # is replaced by docker-compose.immuta.yml with Immuta's generated file.
+      - ./trino/etc/access-control/immuta-placeholder.properties:/etc/trino/access-control/immuta.properties:ro
       # Trino reads and writes Iceberg data files directly on this mount.
       - ./data/warehouse:/warehouse
       # Seed and smoke-test SQL, executed with the bundled Trino CLI.
       - ./sql:/sql:ro
     mem_limit: ${TRINO_MEMORY:?set TRINO_MEMORY in .env}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # CloudBeaver: a browser SQL client for running the same query as each
+  # logical Trino identity.
+  #
+  # cloudbeaver/initial-data-sources.conf pre-creates one connection per test
+  # user; picking a connection picks the Trino request identity, which is what
+  # both the file-based rules and Immuta policy are evaluated against.
+  #
+  # Anonymous access is enabled, so there is no CloudBeaver login at all. Its
+  # own workspace (H2 database, saved SQL scripts) lives in a Docker volume
+  # and is disposable - nothing here needs to survive `make reset`.
+  # ---------------------------------------------------------------------
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:${CLOUDBEAVER_VERSION:?set CLOUDBEAVER_VERSION in .env}
+    container_name: immuta-trino-cloudbeaver
+    depends_on:
+      trino:
+        condition: service_healthy
+    ports:
+      # Bound to localhost only, like every other port in this stack.
+      - "127.0.0.1:${CLOUDBEAVER_PORT:?set CLOUDBEAVER_PORT in .env}:8978"
+    environment:
+      # Skips CloudBeaver's first-run setup wizard. Without an admin account
+      # the server stays in configuration mode and refuses to serve anything.
+      CB_SERVER_NAME: Immuta Trino lab
+      CB_ADMIN_NAME: ${CLOUDBEAVER_ADMIN_USER:?set CLOUDBEAVER_ADMIN_USER in .env}
+      CB_ADMIN_PASSWORD: ${CLOUDBEAVER_ADMIN_PASSWORD:?set CLOUDBEAVER_ADMIN_PASSWORD in .env}
+      # No login screen, and the anonymous user gets the pre-seeded
+      # connections. Fine for a local lab with synthetic data only.
+      CLOUDBEAVER_APP_ANONYMOUS_ACCESS_ENABLED: "true"
+      CLOUDBEAVER_APP_GRANT_CONNECTIONS_ACCESS_TO_ANONYMOUS_TEAM: "true"
+      # Lets you add ad-hoc connections for usernames that are not seeded.
+      CLOUDBEAVER_APP_SUPPORTS_CUSTOM_CONNECTIONS: "true"
+    volumes:
+      - ./cloudbeaver/initial-data-sources.conf:/opt/cloudbeaver/conf/initial-data-sources.conf:ro
+      - cloudbeaver-workspace:/opt/cloudbeaver/workspace
+    mem_limit: ${CLOUDBEAVER_MEMORY:?set CLOUDBEAVER_MEMORY in .env}
     restart: unless-stopped
 
   # ---------------------------------------------------------------------
@@ -94,3 +140,8 @@ services:
     # Named tunnel: stable hostname, requires TUNNEL_TOKEN in .env.
     command: ["tunnel", "run", "--token", "${TUNNEL_TOKEN:-}"]
     restart: unless-stopped
+
+# Only CloudBeaver's own state lives in a Docker volume. All Iceberg data and
+# catalog state is bind-mounted into ./data instead.
+volumes:
+  cloudbeaver-workspace:

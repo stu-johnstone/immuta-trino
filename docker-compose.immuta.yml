@@ -15,6 +15,9 @@ services:
   trino:
     volumes:
       - ./immuta/plugin:/usr/lib/trino/plugin/immuta:ro
-      # Trino loads /etc/trino/access-control.properties by default, and the
-      # Immuta file sets access-control.name=immuta.
-      - ./immuta/immuta-access-control.properties:/etc/trino/access-control.properties:ro
+      # Takes over the Immuta slot of access-control.config-files (see
+      # trino/etc/config.properties) from the allow-all placeholder that the
+      # base stack mounts there. Compose merges volumes by target path, so
+      # this replaces the placeholder rather than adding a second mount.
+      # Immuta's file sets access-control.name=immuta.
+      - ./immuta/immuta-access-control.properties:/etc/trino/access-control/immuta.properties:ro
