@@ -1,0 +1,96 @@
+# Disposable local Trino + Apache Iceberg lab for Immuta integration testing.
+#
+# Persistence (all bind-mounted into this project directory, never the
+# container filesystem):
+#   ./data/warehouse  Iceberg data + metadata files (the warehouse)
+#   ./data/catalog    Iceberg REST catalog state (SQLite database)
+#
+# There is deliberately no PostgreSQL in this stack.
+name: immuta-trino
+
+services:
+  # ---------------------------------------------------------------------
+  # Apache Iceberg REST catalog.
+  #
+  # The simplest Iceberg catalog that works with Trino without PostgreSQL:
+  # the Apache REST catalog fixture backed by a SQLite file. Both the
+  # catalog database and the warehouse are bind-mounted, so table metadata
+  # survives container restarts and `docker compose down`.
+  # ---------------------------------------------------------------------
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:${ICEBERG_REST_VERSION:?set ICEBERG_REST_VERSION in .env}
+    container_name: immuta-trino-catalog
+    environment:
+      REST_PORT: 8181
+      # Persistent catalog state. NOT an in-memory catalog.
+      CATALOG_URI: jdbc:sqlite:file:/catalog/iceberg_catalog.db
+      CATALOG_WAREHOUSE: file:///warehouse
+      CATALOG_IO__IMPL: org.apache.iceberg.hadoop.HadoopFileIO
+    ports:
+      # Bound to localhost only. Immuta reaches Trino through the tunnel,
+      # never this port.
+      - "127.0.0.1:${ICEBERG_REST_PORT:?set ICEBERG_REST_PORT in .env}:8181"
+    volumes:
+      - ./data/catalog:/catalog
+      - ./data/warehouse:/warehouse
+    mem_limit: ${ICEBERG_REST_MEMORY:?set ICEBERG_REST_MEMORY in .env}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Trino coordinator (single node, open source image, pinned version).
+  #
+  # Only the files this project owns are mounted into /etc/trino, so the
+  # image defaults (jvm.config, node.properties, log.properties and the
+  # built-in tpch/jmx catalogs) are kept intact. The image sizes the JVM
+  # heap from the container memory limit, so tune TRINO_MEMORY in .env.
+  # ---------------------------------------------------------------------
+  trino:
+    image: trinodb/trino:${TRINO_VERSION:?set TRINO_VERSION in .env}
+    container_name: immuta-trino
+    depends_on:
+      iceberg-rest:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${TRINO_HTTP_PORT:?set TRINO_HTTP_PORT in .env}:8080"
+    volumes:
+      - ./trino/etc/config.properties:/etc/trino/config.properties:ro
+      - ./trino/etc/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
+      # Trino reads and writes Iceberg data files directly on this mount.
+      - ./data/warehouse:/warehouse
+      # Seed and smoke-test SQL, executed with the bundled Trino CLI.
+      - ./sql:/sql:ro
+    mem_limit: ${TRINO_MEMORY:?set TRINO_MEMORY in .env}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # Cloudflare tunnel, so the Immuta SaaS tenant can reach this local
+  # Trino for connection registration and object sync.
+  #
+  # Profile-gated: neither service starts with `make up`. Use `make tunnel`.
+  #
+  # SECURITY: this stack runs Trino without authentication. While a tunnel
+  # is running, anyone with the URL can query the test data. Only ever use
+  # synthetic data here and run `make tunnel-down` when you are finished.
+  # ---------------------------------------------------------------------
+  tunnel:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:?set CLOUDFLARED_VERSION in .env}
+    container_name: immuta-trino-tunnel
+    profiles: ["tunnel"]
+    depends_on:
+      trino:
+        condition: service_healthy
+    # Quick tunnel: no Cloudflare account, random *.trycloudflare.com
+    # hostname that changes every restart. Get it with `make tunnel-url`.
+    command: ["tunnel", "--url", "http://trino:8080"]
+    restart: unless-stopped
+
+  tunnel-named:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:?set CLOUDFLARED_VERSION in .env}
+    container_name: immuta-trino-tunnel
+    profiles: ["tunnel-named"]
+    depends_on:
+      trino:
+        condition: service_healthy
+    # Named tunnel: stable hostname, requires TUNNEL_TOKEN in .env.
+    command: ["tunnel", "run", "--token", "${TUNNEL_TOKEN:-}"]
+    restart: unless-stopped

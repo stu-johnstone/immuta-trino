@@ -1,0 +1,18 @@
+# Local environment configuration (may contain tunnel tokens)
+.env
+
+# Iceberg warehouse + catalog state. Recreate with `make up && make seed`.
+data/
+
+# Immuta generated access control configuration. CONTAINS AN API KEY.
+# Never commit this file.
+immuta/immuta-access-control.properties
+immuta/*.properties
+
+# Immuta Trino plugin jars (downloaded from Immuta, not redistributable)
+immuta/plugin/*
+!immuta/plugin/.gitkeep
+
+# Scratch
+*.log
+.DS_Store
